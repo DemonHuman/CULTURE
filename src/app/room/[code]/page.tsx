@@ -8,12 +8,9 @@ import type { Room, Player } from "../../../lib/quiz";
 import Correction from "../../../components/Correction";
 import CorrectionView from "../../../components/CorrectionView";
 import Results from "../../../components/Results";
-import { Shell, Avatar, CodeTiles } from "../../../components/ui";
+import { Shell, Avatar, CodeTiles, Pills } from "../../../components/ui";
 
 type Question = { texte: string; difficulte: number; categorie: string | null };
-
-// Doit correspondre à la durée d'une question dans start_game / advance_room (SQL)
-const QUESTION_SECONDS = 20;
 
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
@@ -31,6 +28,7 @@ export default function RoomPage() {
   const [progress, setProgress] = useState(1);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allCats, setAllCats] = useState<{ categorie: string; nb: number }[]>([]);
 
   const answerRef = useRef("");
   const latestRef = useRef<{ q: number; status: string }>({ q: 0, status: "" });
@@ -39,10 +37,24 @@ export default function RoomPage() {
   const status = room?.status;
   const currentQ = room?.current_question ?? 0;
   const endsAt = room?.question_ends_at ?? null;
+  const questionSeconds = room?.question_seconds ?? 20;
+  const iAmHost = !!myId && room?.host_id === myId;
 
   useEffect(() => {
     latestRef.current = { q: currentQ, status: status ?? "" };
   }, [currentQ, status]);
+
+  // ---------- Catégories disponibles (pour les réglages de l'hôte) ----------
+  useEffect(() => {
+    if (!iAmHost || status !== "lobby") return;
+    let cancelled = false;
+    supabase.rpc("list_categories").then(({ data }) => {
+      if (!cancelled && data) setAllCats(data as { categorie: string; nb: number }[]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [iAmHost, status]);
 
   // ---------- Chargement du salon + temps réel ----------
   useEffect(() => {
@@ -58,7 +70,7 @@ export default function RoomPage() {
       const { data: r } = await supabase
         .from("rooms")
         .select(
-          "id, code, host_id, status, current_question, question_ends_at, total_questions, correction_index"
+          "id, code, host_id, status, current_question, question_ends_at, total_questions, correction_index, question_seconds, nb_questions, categories"
         )
         .eq("code", code)
         .maybeSingle();
@@ -161,7 +173,7 @@ export default function RoomPage() {
       const ms = Math.max(0, end - Date.now());
       const left = Math.ceil(ms / 1000);
       setRemaining(left);
-      setProgress(Math.min(1, ms / (QUESTION_SECONDS * 1000)));
+      setProgress(Math.min(1, ms / (questionSeconds * 1000)));
       if (left === 0 && !done) {
         done = true;
         finishQuestion();
@@ -171,14 +183,14 @@ export default function RoomPage() {
     tick();
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
-  }, [roomId, status, currentQ, endsAt]);
+  }, [roomId, status, currentQ, endsAt, questionSeconds]);
 
   // ---------- Actions ----------
   async function handleStart() {
     if (!room) return;
     setError(null);
     setStarting(true);
-    const { error } = await supabase.rpc("start_game", { p_room: room.id, p_nb: 20 });
+    const { error } = await supabase.rpc("start_game", { p_room: room.id });
     if (error) {
       setError(
         error.message.includes("no questions")
@@ -213,6 +225,35 @@ export default function RoomPage() {
     return error ? "Impossible de terminer la correction." : null;
   }
 
+  // L'hôte règle la partie (nombre de questions, durée, catégories) avant le lancement
+  async function updateSettings(
+    patch: Partial<Pick<Room, "nb_questions" | "question_seconds" | "categories">>
+  ) {
+    if (!room) return;
+    setError(null);
+    const next = {
+      nb_questions: room.nb_questions,
+      question_seconds: room.question_seconds,
+      categories: room.categories,
+      ...patch,
+    };
+    setRoom((prev) => (prev ? { ...prev, ...next } : prev));
+    const { error } = await supabase.rpc("set_room_settings", {
+      p_room: room.id,
+      p_nb: next.nb_questions,
+      p_seconds: next.question_seconds,
+      p_categories: next.categories,
+    });
+    if (error) setError("Impossible d'enregistrer les réglages.");
+  }
+
+  // Rejouer : remet le salon dans le lobby avec les mêmes joueurs
+  async function handleReplay(): Promise<string | null> {
+    if (!room) return "Salon introuvable.";
+    const { error } = await supabase.rpc("reset_room", { p_room: room.id });
+    return error ? "Impossible de relancer une partie." : null;
+  }
+
   // ---------- Affichage ----------
   if (notFound) {
     return (
@@ -240,7 +281,15 @@ export default function RoomPage() {
 
   // Phase 4 : résultats
   if (room.status === "finished") {
-    return <Results roomId={room.id} players={players} myId={myId} />;
+    return (
+      <Results
+        roomId={room.id}
+        players={players}
+        myId={myId}
+        isHost={isHost}
+        onReplay={handleReplay}
+      />
+    );
   }
 
   // Phase 3 : correction (l'hôte corrige, les autres regardent)
@@ -347,6 +396,20 @@ export default function RoomPage() {
   }
 
   // Phase 1 : lobby
+  const allNames = allCats.map((c) => c.categorie);
+  const selectedCats = room.categories ?? allNames;
+  const availableQuestions = allCats
+    .filter((c) => selectedCats.includes(c.categorie))
+    .reduce((sum, c) => sum + c.nb, 0);
+
+  function toggleCategory(name: string) {
+    const next = selectedCats.includes(name)
+      ? selectedCats.filter((n) => n !== name)
+      : [...selectedCats, name];
+    if (next.length === 0) return; // au moins une catégorie
+    updateSettings({ categories: next.length === allNames.length ? null : next });
+  }
+
   return (
     <Shell center>
       <div className="space-y-8">
@@ -371,6 +434,69 @@ export default function RoomPage() {
             ))}
           </ul>
         </section>
+
+        {isHost ? (
+          <section className="panel space-y-5">
+            <h2 className="font-display text-2xl">Réglages de la partie</h2>
+
+            <div className="space-y-2">
+              <p className="font-bold">Nombre de questions</p>
+              <Pills
+                options={[10, 15, 20, 30]}
+                value={room.nb_questions}
+                onChange={(v) => updateSettings({ nb_questions: v })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-bold">Temps par question</p>
+              <Pills
+                options={[15, 20, 30, 45]}
+                value={room.question_seconds}
+                suffix=" s"
+                onChange={(v) => updateSettings({ question_seconds: v })}
+              />
+            </div>
+
+            {allCats.length > 0 && (
+              <div className="space-y-2">
+                <p className="font-bold">Catégories</p>
+                <div className="flex flex-wrap gap-2">
+                  {allCats.map((c) => {
+                    const on = selectedCats.includes(c.categorie);
+                    return (
+                      <button
+                        key={c.categorie}
+                        type="button"
+                        onClick={() => toggleCategory(c.categorie)}
+                        aria-pressed={on}
+                        className={`chip cursor-pointer text-base focus-visible:outline-4 focus-visible:outline-bleu ${
+                          on ? "bg-soleil text-nuit" : "bg-brume text-nuit/50"
+                        }`}
+                      >
+                        {c.categorie}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-sm font-bold text-nuit/60">
+                  {availableQuestions} questions disponibles
+                  {availableQuestions < room.nb_questions ? ", la partie sera plus courte." : "."}
+                </p>
+              </div>
+            )}
+          </section>
+        ) : (
+          <div className="flex flex-wrap justify-center gap-2">
+            <span className="chip bg-white/15 text-white">{room.nb_questions} questions</span>
+            <span className="chip bg-white/15 text-white">
+              {room.question_seconds} secondes par question
+            </span>
+            <span className="chip bg-white/15 text-white">
+              {room.categories ? room.categories.join(", ") : "Toutes les catégories"}
+            </span>
+          </div>
+        )}
 
         {isHost ? (
           <button onClick={handleStart} disabled={starting} className="btn btn-menthe">

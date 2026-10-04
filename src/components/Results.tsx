@@ -10,15 +10,19 @@ type Props = {
   roomId: string;
   players: Player[];
   myId: string | null;
+  isHost: boolean;
+  onReplay: () => Promise<string | null>;
 };
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 const BAR_HEIGHT = ["h-36", "h-28", "h-20"]; // 1er, 2e, 3e
 
-export default function Results({ roomId, players, myId }: Props) {
+export default function Results({ roomId, players, myId, isHost, onReplay }: Props) {
   const [questions, setQuestions] = useState<RecapQuestion[]>([]);
   const [answers, setAnswers] = useState<RecapAnswer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [replaying, setReplaying] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
 
   const playerIds = players.map((p) => p.id).join(",");
 
@@ -43,6 +47,14 @@ export default function Results({ roomId, players, myId }: Props) {
   const top = ranking.slice(0, 3);
   const podium = [top[1], top[0], top[2]].filter(Boolean) as Player[];
   const others = ranking.slice(3);
+
+  async function replay() {
+    setReplaying(true);
+    setReplayError(null);
+    const err = await onReplay();
+    if (err) setReplayError(err);
+    setReplaying(false);
+  }
 
   const me = players.find((p) => p.user_id === myId);
   const myAnswers = me ? answers.filter((a) => a.player_id === me.id) : [];
@@ -139,9 +151,25 @@ export default function Results({ roomId, players, myId }: Props) {
         )}
       </section>
 
-      <Link href="/" className="btn btn-bleu">
-        {"Retour à l'accueil"}
-      </Link>
+      <div className="space-y-4">
+        {isHost ? (
+          <button onClick={replay} disabled={replaying} className="btn btn-menthe">
+            Rejouer avec les mêmes joueurs
+          </button>
+        ) : (
+          <p className="text-center font-bold text-white/70">
+            {"L'hôte peut relancer une partie avec vous."}
+          </p>
+        )}
+        {replayError && (
+          <p role="alert" className="text-center text-sm font-bold text-tomate">
+            {replayError}
+          </p>
+        )}
+        <Link href="/" className="btn btn-ghost">
+          {"Retour à l'accueil"}
+        </Link>
+      </div>
     </Shell>
   );
 }

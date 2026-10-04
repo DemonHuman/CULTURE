@@ -9,6 +9,9 @@ export type Room = {
   question_ends_at: string | null;
   total_questions: number;
   correction_index: number;
+  question_seconds: number;
+  nb_questions: number;
+  categories: string[] | null;
 };
 
 export type Player = {

@@ -102,3 +102,35 @@ export function CodeTiles({ code }: { code: string }) {
     </div>
   );
 }
+
+// Choix parmi quelques valeurs numériques (nombre de questions, durée...)
+export function Pills({
+  options,
+  value,
+  onChange,
+  suffix = "",
+}: {
+  options: number[];
+  value: number;
+  onChange: (v: number) => void;
+  suffix?: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" role="group">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          onClick={() => onChange(o)}
+          aria-pressed={o === value}
+          className={`rounded-full px-4 py-1.5 text-base font-extrabold transition focus-visible:outline-4 focus-visible:outline-bleu ${
+            o === value ? "bg-soleil text-nuit" : "bg-brume text-nuit/60 hover:text-nuit"
+          }`}
+        >
+          {o}
+          {suffix}
+        </button>
+      ))}
+    </div>
+  );
+}

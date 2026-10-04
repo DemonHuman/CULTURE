@@ -6,7 +6,7 @@ const display = Lilita_One({ weight: "400", subsets: ["latin"], variable: "--f-d
 const body = Nunito({ subsets: ["latin"], variable: "--f-body" });
 
 export const metadata: Metadata = {
-  title: "Quiz",
+  title: "ZestLab",
   description: "Un quiz multijoueur entre amis",
 };
 
