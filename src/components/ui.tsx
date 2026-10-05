@@ -36,7 +36,7 @@ export function Shell({
 export function Wordmark() {
   return (
     <div className="flex flex-col items-center gap-3">
-      <h1 className="font-display text-6xl tracking-wide text-white sm:text-7xl">Quiz</h1>
+      <h1 className="font-display text-6xl tracking-wide text-white sm:text-7xl">Zculture</h1>
       <div className="flex items-center gap-2" aria-hidden>
         <span className="h-4 w-4 rounded-full bg-tomate" />
         <span className="h-4 w-4 rounded-[4px] bg-bleu" />
