@@ -7,7 +7,7 @@ const body = Nunito({ subsets: ["latin"], variable: "--f-body" });
 
 export const metadata: Metadata = {
   title: "Zculture",
-  description: "Un quiz multijoueur entre amis",
+  description: "Testez votre culture générale, entre amis !",
 };
 
 export const viewport: Viewport = {
