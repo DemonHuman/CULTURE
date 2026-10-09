@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { loadAnswers, loadRecap } from "../lib/quiz";
+import { imageUrl, loadAnswers, loadRecap } from "../lib/quiz";
 import type { Player, RecapAnswer, RecapQuestion } from "../lib/quiz";
 import { Shell, Avatar } from "./ui";
 
@@ -84,6 +84,14 @@ export default function CorrectionView({ roomId, players, currentIndex, myId }: 
               </span>
             </div>
             <p className="font-display text-2xl leading-snug sm:text-3xl">{q.texte}</p>
+            {q.image_path && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={imageUrl(q.image_path)}
+                alt="Image de la question"
+                className="mx-auto max-h-64 w-full rounded-2xl bg-brume object-contain"
+              />
+            )}
             <div className="rounded-2xl bg-menthe px-4 py-3 text-nuit">
               <p className="text-sm font-bold">Bonne réponse</p>
               <p className="font-display text-2xl">{q.bonne_reponse}</p>

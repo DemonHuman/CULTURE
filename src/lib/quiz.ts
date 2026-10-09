@@ -28,6 +28,7 @@ export type RecapQuestion = {
   texte: string;
   difficulte: number;
   categorie: string | null;
+  image_path: string | null;
   bonne_reponse: string;
 };
 
@@ -54,7 +55,7 @@ export async function loadAnswers(playerIds: string[]): Promise<RecapAnswer[]> {
 export async function loadRecap(roomId: string, playerIds: string[]) {
   const { data: rq } = await supabase
     .from("room_questions")
-    .select("position, questions(id, texte, difficulte, categorie, question_answers(bonne_reponse))")
+    .select("position, questions(id, texte, difficulte, categorie, image_path, question_answers(bonne_reponse))")
     .eq("room_id", roomId)
     .order("position");
 
@@ -69,10 +70,16 @@ export async function loadRecap(roomId: string, playerIds: string[]) {
         texte: q.texte,
         difficulte: q.difficulte,
         categorie: q.categorie,
+        image_path: q.image_path ?? null,
         bonne_reponse: qa?.bonne_reponse ?? "?",
       };
     });
 
   const answers = await loadAnswers(playerIds);
   return { questions, answers };
+}
+
+// Adresse publique d'une image de question (stockée dans Supabase Storage)
+export function imageUrl(path: string) {
+  return supabase.storage.from("question-images").getPublicUrl(path).data.publicUrl;
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
+import { imageUrl } from "../../lib/quiz";
 import { Shell, Pills } from "../../components/ui";
 
 type Row = {
@@ -11,6 +12,7 @@ type Row = {
   difficulte: number;
   categorie: string | null;
   actif: boolean;
+  image_path: string | null;
   bonne_reponse: string;
 };
 
@@ -20,11 +22,19 @@ type Draft = {
   bonne_reponse: string;
   categorie: string;
   difficulte: number;
+  image_path: string | null;
 };
 
 type NewQuestion = { texte: string; bonne_reponse: string; categorie: string; difficulte: number };
 
-const EMPTY: Draft = { id: null, texte: "", bonne_reponse: "", categorie: "", difficulte: 1 };
+const EMPTY: Draft = {
+  id: null,
+  texte: "",
+  bonne_reponse: "",
+  categorie: "",
+  difficulte: 1,
+  image_path: null,
+};
 const PAGE = 50;
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
@@ -59,6 +69,43 @@ function parseBulk(text: string, existing: Set<string>) {
   return { ok, errors, duplicates };
 }
 
+const BUCKET = "question-images";
+
+// Réduit l'image (1200 px max) et la convertit en WebP avant l'envoi :
+// chargement rapide pour les joueurs, et peu d'espace utilisé sur Supabase.
+async function compressImage(file: File): Promise<Blob> {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("format");
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob(resolve, "image/webp", 0.85)
+  );
+  if (!blob) throw new Error("compression");
+  return blob;
+}
+
+async function uploadImage(file: File): Promise<string> {
+  const blob = await compressImage(file);
+  const path = `${crypto.randomUUID()}.webp`;
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, blob, { contentType: "image/webp", cacheControl: "31536000" });
+  if (error) throw error;
+  return path;
+}
+
+async function removeImageFile(path: string) {
+  await supabase.storage.from(BUCKET).remove([path]);
+}
+
 export default function AdminPage() {
   const [phase, setPhase] = useState<"loading" | "login" | "denied" | "ready">("loading");
   const [email, setEmail] = useState("");
@@ -74,6 +121,20 @@ export default function AdminPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // Quand on ouvre ou ferme le formulaire, on oublie le fichier choisi
+  useEffect(() => {
+    setFile(null);
+    setPreview(null);
+  }, [draft?.id]);
+
+  function pickFile(f: File | null) {
+    if (preview) URL.revokeObjectURL(preview);
+    setFile(f);
+    setPreview(f ? URL.createObjectURL(f) : null);
+  }
 
   // ---------- Connexion ----------
   useEffect(() => {
@@ -119,7 +180,7 @@ export default function AdminPage() {
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from("questions")
-      .select("id, texte, difficulte, categorie, actif, question_answers(bonne_reponse)")
+      .select("id, texte, difficulte, categorie, actif, image_path, question_answers(bonne_reponse)")
       .order("categorie")
       .order("texte")
       .range(0, 4999);
@@ -137,6 +198,7 @@ export default function AdminPage() {
           difficulte: r.difficulte,
           categorie: r.categorie,
           actif: r.actif,
+          image_path: r.image_path ?? null,
           bonne_reponse: qa?.bonne_reponse ?? "",
         };
       })
@@ -182,7 +244,24 @@ export default function AdminPage() {
     }
 
     setBusy(true);
-    const payload = { texte, difficulte: draft.difficulte, categorie };
+
+    // Image : envoi du nouveau fichier si besoin (draft.image_path vaut null si on l'a retirée)
+    const previousPath = draft.id ? rows.find((r) => r.id === draft.id)?.image_path ?? null : null;
+    let imagePath: string | null = draft.image_path;
+    let uploadedPath: string | null = null;
+    if (file) {
+      try {
+        uploadedPath = await uploadImage(file);
+        imagePath = uploadedPath;
+      } catch {
+        say("error", "Impossible d'envoyer l'image (formats acceptés : JPEG, PNG ou WebP, 2 Mo maximum).");
+        setBusy(false);
+        return;
+      }
+    }
+
+    const payload = { texte, difficulte: draft.difficulte, categorie, image_path: imagePath };
+    let failed = false;
 
     if (draft.id) {
       const { error } = await supabase.from("questions").update(payload).eq("id", draft.id);
@@ -191,11 +270,13 @@ export default function AdminPage() {
         : await supabase
             .from("question_answers")
             .upsert({ question_id: draft.id, bonne_reponse: reponse });
-      if (error || e2) say("error", "Impossible d'enregistrer les modifications.");
+      failed = !!(error || e2);
+      if (failed) say("error", "Impossible d'enregistrer les modifications.");
       else say("ok", "Question modifiée.");
     } else {
       const { data, error } = await supabase.from("questions").insert(payload).select("id").single();
       if (error || !data) {
+        failed = true;
         say("error", "Impossible d'ajouter la question.");
       } else {
         const { error: e2 } = await supabase
@@ -203,6 +284,7 @@ export default function AdminPage() {
           .insert({ question_id: data.id, bonne_reponse: reponse });
         if (e2) {
           await supabase.from("questions").delete().eq("id", data.id);
+          failed = true;
           say("error", "Impossible d'enregistrer la réponse : la question n'a pas été ajoutée.");
         } else {
           say("ok", "Question ajoutée.");
@@ -210,8 +292,12 @@ export default function AdminPage() {
       }
     }
 
+    // Ménage : on ne garde que les fichiers réellement utilisés
+    if (failed && uploadedPath) await removeImageFile(uploadedPath);
+    if (!failed && previousPath && previousPath !== imagePath) await removeImageFile(previousPath);
+
     setBusy(false);
-    setDraft(null);
+    if (!failed) setDraft(null);
     await load();
   }
 
@@ -226,6 +312,7 @@ export default function AdminPage() {
       say("error", "Impossible de supprimer la question.");
     } else {
       say("ok", "Question supprimée.");
+      if (r.image_path) await removeImageFile(r.image_path);
     }
     await load();
   }
@@ -434,6 +521,43 @@ export default function AdminPage() {
               onChange={(v) => setDraft({ ...draft, difficulte: v })}
             />
           </div>
+          <div className="space-y-2">
+            <p className="font-bold">Image (facultative)</p>
+            {(preview || draft.image_path) && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={preview ?? imageUrl(draft.image_path!)}
+                alt="Aperçu de l'image de la question"
+                className="max-h-56 w-full rounded-2xl bg-brume object-contain"
+              />
+            )}
+            <div className="flex flex-wrap gap-2">
+              <label className="btn btn-bleu btn-sm cursor-pointer focus-within:outline-4 focus-within:outline-offset-2 focus-within:outline-bleu">
+                {preview || draft.image_path ? "Changer l'image" : "Choisir une image"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="sr-only"
+                  onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {(preview || draft.image_path) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    pickFile(null);
+                    setDraft({ ...draft, image_path: null });
+                  }}
+                  className="btn btn-sm bg-brume text-nuit"
+                >
+                  {"Retirer l'image"}
+                </button>
+              )}
+            </div>
+            <p className="text-sm font-bold text-nuit/60">
+              {"JPEG, PNG ou WebP. L'image est réduite automatiquement avant l'envoi."}
+            </p>
+          </div>
           <div className="flex gap-3">
             <button onClick={save} disabled={busy} className="btn btn-menthe">
               Enregistrer
@@ -525,6 +649,15 @@ export default function AdminPage() {
               </span>
               {!r.actif && <span className="chip bg-tomate text-white">Désactivée</span>}
             </div>
+            {r.image_path && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={imageUrl(r.image_path)}
+                alt="Image de la question"
+                className="h-20 w-auto rounded-xl bg-brume object-contain"
+                loading="lazy"
+              />
+            )}
             <p className="text-lg font-bold">{r.texte}</p>
             <p className="font-bold text-menthe">{r.bonne_reponse}</p>
             <div className="flex flex-wrap gap-2">
@@ -535,6 +668,7 @@ export default function AdminPage() {
                     texte: r.texte,
                     bonne_reponse: r.bonne_reponse,
                     categorie: r.categorie ?? "",
+                    image_path: r.image_path,
                     difficulte: r.difficulte,
                   });
                   setBulkOpen(false);

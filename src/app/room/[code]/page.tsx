@@ -4,13 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase, ensureSession } from "../../../lib/supabase";
+import { imageUrl } from "../../../lib/quiz";
 import type { Room, Player } from "../../../lib/quiz";
 import Correction from "../../../components/Correction";
 import CorrectionView from "../../../components/CorrectionView";
 import Results from "../../../components/Results";
 import { Shell, Avatar, CodeTiles, Pills } from "../../../components/ui";
 
-type Question = { texte: string; difficulte: number; categorie: string | null };
+type Question = {
+  texte: string;
+  difficulte: number;
+  categorie: string | null;
+  image_path: string | null;
+};
 
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
@@ -132,7 +138,7 @@ export default function RoomPage() {
 
     supabase
       .from("room_questions")
-      .select("position, questions(texte, difficulte, categorie)")
+      .select("position, questions(texte, difficulte, categorie, image_path)")
       .eq("room_id", roomId)
       .eq("position", currentQ)
       .maybeSingle()
@@ -353,6 +359,14 @@ export default function RoomPage() {
                 </span>
               </div>
               <h1 className="font-display text-2xl leading-snug sm:text-4xl">{question.texte}</h1>
+              {question.image_path && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={imageUrl(question.image_path)}
+                  alt="Illustration de la question"
+                  className="mx-auto max-h-72 w-full rounded-2xl bg-brume object-contain sm:max-h-96"
+                />
+              )}
             </div>
 
             <div className="space-y-4">

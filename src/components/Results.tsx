@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { loadRecap } from "../lib/quiz";
+import { imageUrl, loadRecap } from "../lib/quiz";
 import type { Player, RecapAnswer, RecapQuestion } from "../lib/quiz";
 import { Shell, Avatar, playerColor } from "./ui";
 
@@ -127,7 +127,18 @@ export default function Results({ roomId, players, myId, isHost, onReplay }: Pro
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <p className="font-bold">{q.texte}</p>
+                    <div className="min-w-0 space-y-2">
+                      <p className="font-bold">{q.texte}</p>
+                      {q.image_path && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={imageUrl(q.image_path)}
+                          alt="Image de la question"
+                          className="max-h-40 rounded-xl bg-brume object-contain"
+                          loading="lazy"
+                        />
+                      )}
+                    </div>
                     <span
                       className={`chip shrink-0 ${
                         pts > 0 ? "bg-menthe text-nuit" : "bg-tomate text-white"
