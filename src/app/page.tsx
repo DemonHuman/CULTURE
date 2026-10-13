@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, ensureSession } from "../lib/supabase";
 import { Shell, Wordmark } from "../components/ui";
+import { InstallButton } from "../components/pwa";
 
 function traduireErreur(message: string, code?: string) {
   if (code === "23505") return "Ce pseudo est déjà pris dans ce salon.";
@@ -58,6 +59,7 @@ export default function Home() {
     <Shell center>
       <div className="space-y-8">
         <Wordmark />
+        <InstallButton />
 
         <div className="panel space-y-4">
           <input
