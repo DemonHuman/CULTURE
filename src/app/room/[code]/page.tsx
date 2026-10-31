@@ -10,6 +10,7 @@ import Correction from "../../../components/Correction";
 import CorrectionView from "../../../components/CorrectionView";
 import Results from "../../../components/Results";
 import { Shell, Avatar, CodeTiles, Pills } from "../../../components/ui";
+import InviteShare from "../../../components/InviteShare";
 
 type Question = {
   texte: string;
@@ -430,6 +431,7 @@ export default function RoomPage() {
         <div className="space-y-3 text-center">
           <p className="font-bold text-white/70">Partage ce code à tes amis</p>
           <CodeTiles code={room.code} />
+          <InviteShare code={room.code} />
         </div>
 
         <section className="space-y-3">
